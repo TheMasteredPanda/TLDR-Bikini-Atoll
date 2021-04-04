@@ -1,27 +1,6 @@
+import requests
 from enum import Enum
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.remote.webelement import WebElement
-from selenium.webdriver.support.ui import Select
-from selenium.common.exceptions import NoSuchElementException
-
-options = Options()
-options.headless = True
-driver = webdriver.Chrome(options=options)
-driver.get('https://bills.parliament.uk/')
-
-'''
------------------------------------------------------------
-Main set of classes used to intedface with the UK Parliament
-Legislation Library.
-
-TODO:
-    - Support the options provided when you expand the form.
-
------------------------------------------------------------
-'''
+from bs4 import BeautifulSoup
 
 class BillSession(Enum):
     ALL = {"value": "0", "name": "All"}
@@ -74,115 +53,101 @@ class CurrentHouse(Enum):
     BOTH = {"value": "", "name": "All"}
     NEITHER = {"value": "3", "name": "Not before either House"}
 
-'''
-Used to interact with the search form on the bills website.
-'''
-class SearchForm():
-    def __init__(self, driver: webdriver.Chrome):
-        try:
-            self.driver = driver
-            self.bill_title_input: WebElement = driver.find_element_by_id('SearchTerm')
-            self.session_input: Select = Select(driver.find_element_by_id('Session'))
-            self.bill_stage_input: Select = Select(driver.find_element_by_id('BillStage'))
-            self.bill_sort_order_input: Select = Select(driver.find_element_by_id('BillSortOrder'))
-            self.bill_type_input: Select = Select(driver.find_element_by_id('BillType'))
-            self.current_house_input: Select = Select(driver.find_element_by_id('CurrentHouse'))
-            self.search_button: WebElement = driver.find_element(by=By.CSS_SELECTOR, value="button[type=submit]")
-        except Exception as err:
-            raise err
-     
-    def set_bill_title(self, title: str):
-        self.bill_title_input.clear()
-        self.bill_title_input.send_keys(title)
-
-    def set_session(self, bill_session: BillSession):
-        self.session_input.select_by_value(bill_session.value['value'])
-
-    def set_bill_stage(self, bill_stage: BillStage):
-        options = self.bill_stage_input.options
-
-        for option in options:
-            opt: WebElement = option
-            print(opt.get_attribute('value'))
-
-        self.bill_stage_input.select_by_value(str(bill_stage.value['value']))
-
-    def set_bill_type(self, bill_type: BillType):
-        self.bill_type_input.select_by_value(bill_type.value['value'])
-
-    def set_current_house(self, house: CurrentHouse):
-        self.current_house_input.select_by_value(house.value['value'])
-
-    def set_sort_order(self, order: SortOrder):
-        self.bill_sort_order_input.select_by_value(order.value['value'])
-
-    def search(self):
-        self.search_button.click()
-        return self.driver
-
-form = SearchForm(driver)
-
-bills: list[WebElement] = driver.find_elements_by_class_name('card-bill')
-#Get bill name, last updated, session of introduction, orignation, and next stage.
+class OriginatingHosue(Enum):
+    HOC = {'value': '1', 'name': 'Hosue of Commons'}
+    HOL = {'value': '2', 'name': 'House of Lords'}
+    NEITHER = {'value': '3', 'name': 'Not before either House'}
 
 '''
-Used to retrieve relevant information from an entry from a search.
+https://bills.parliament.uk/?SearchTerm=&Session=35&BillSortOrder=0&BillType=&BillStage=&CurrentHouse=&OriginatingHouse=&Expanded=False
 '''
+class StringBuilder():
+    def __init__(self):
+        self.url = 'https://bills.parliament.uk'
+        self.bits = []
+
+    def set_search_term(self, search_term: str):
+        self.bits.append(f'SearchTerm={search_term.split("+")}')
+
+    def set_session(self, session: BillSession):
+        self.bits.append(f'Session={session.value["value"]}')
+
+    def set_order(self, order: SortOrder):
+        self.bits.append(f'BillSortOrder={order.value["value"]}')
+
+    def set_bill_type(self, btype: BillType):
+        self.bits.append(f'BillType={btype.value["value"]}')
+
+    def set_current_house(self, current_house: CurrentHouse):
+        self.bits.append(f'CurrentHouse={current_house.value["value"]}')
+
+    def set_originating_house(self, originating_house: OriginatingHosue):
+        self.bits.append(f'OriginatingHouse={originating_house.value["value"]}')
+
+    def build(self):
+        return f'{self.url}{"?" if len(self.bits) > 0 else ""}{"&".join(self.bits)}'
+
 class Bill():
-    def __init__(self, bill):
-        content: WebElement = bill.find_element_by_class_name('content')
-        name_element: WebElement = content.find_element_by_class_name('primary-info')
-        self.name = name_element.get_attribute('innerHTML')
-        session_element = bill.find_element_by_class_name('secondary-info')
-        self.session = session_element.get_attribute('innerHTML')
-        infographic_element = bill.find_element_by_class_name('infographic')
-        infographic_items = infographic_element.find_element_by_class_name('items')
-        item_contents: list[WebElement] = infographic_element.find_elements_by_class_name('item')
-        originated_element = item_contents[0]
-        self.originated = originated_element.find_element_by_class_name('item-value').get_attribute('innerHTML')
-        next_stage_element = item_contents[1]
-        self.next_stage_label = next_stage_element.find_element_by_class_name('label').get_attribute('innerHTML').replace('Next Stage:', '').strip()
-        self.next_stage_value = next_stage_element.find_element_by_class_name('item-value').get_attribute('innerHTML').replace('<br>', '')
-        info_element = bill.find_element_by_class_name('info')
-        last_updated_element = info_element.find_element_by_class_name('indicators-left')
-        bill_type_element = info_element.find_element_by_class_name('indicators-right')
-        #TODO: Turn this string date and time into a datetime object.
-        self.last_updated = last_updated_element.get_attribute('innerHTML').replace('Last updated: ').strip()
-        inner_bill_type_element = bill_type_element.find_element_by_class_name('indicator')
-        self.bill_type = inner_bill_type_element.get_attribute('data-help-title').strip()
+    def __init__(self, element: BeautifulSoup): 
+        content = element.find('div', {'class': 'content'})
+        self.link = content.find('a', {'class': 'overlay-link'})['href']
+        self.name = content.find('div', {'class': 'primary-info'}).text
+        self.session = content.find('div', {'class': 'secondary-info'}).text.replace('Session ', '').strip()
+        infographic_element = content.find('div', {'class': 'infographic'})
+        items = infographic_element.find_all('div', {'class': 'item-content'})
+        self.originating_hosue = items[0].find('div', {'class': 'item-value'}).text
+        self.next_bill_stage = items[1].find('div', {'class': 'label'}).text.replace('Next Stage: ', '')
+        self.next_bill_stage_target = items[1].find('div', {'class': 'item-value'}).text.strip()
+        info_element = element.find('div', {'class': 'info'})
+        self.last_update = info_element.find('div', {'class': 'indicators-left'}).text.strip().replace('Last updated: ', '')
+        self.bill_type = info_element.find('div', {'class': 'indicators-right'}).find('a', {'class': 'help-overlay-link'})['data-help-title']
 
-    def get_bill_name(self):
+    def get_link(self):
+        return self.link
+
+    def get_name(self):
         return self.name
 
-    def get_session_introduced(self):
+    def get_session(self):
         return self.session
-    
-    #Where the bill originated.
-    def get_origination(self):
-        return self.originated
 
-    def get_next_stage(self):
-        return self.next_stage_value
+    def get_originating_house(self):
+        return self.originating_hosue
 
-    def get_next_stage_type(self):
-        return self.next_stage_label
+    def get_next_bill_stage(self):
+        return self.next_bill_stage
+
+    def get_next_bill_stage_destination(self):
+        return self.next_bill_stage_target
+
+    def get_last_update(self):
+        return self.last_update
 
     def get_bill_type(self):
         return self.bill_type
+    
+builder = StringBuilder()
+builder.set_search_term('European Union')
 
-    def get_last_update_time(self):
-        return self.last_updated
+response = requests.get(builder.build())
+soup = BeautifulSoup(response.content, features='lxml')
 
-    #Clicks this bill entry on the headless browser.
-    def click(self):
-        pass
+bill_elements = soup.find_all('div', {'class': 'card-bill'})
+bills = []
+next_line = '\n'
 
-search = SearchForm(driver)
-search.set_bill_title('dfafjakdfj')
-search.search()
+for element in bill_elements:
+    bill = Bill(element)
+    print('------')
+    print(f'Name: {bill.get_name()}')
+    print(f'Link: {bill.get_link()}')
+    print(f'Session: {bill.get_session()}')
+    print(f'Originating House: {bill.get_originating_house()}')
+    print(f'Next Bill Stage: {bill.get_next_bill_stage()}')
+    print(f'Next Bill Stage Destingation: {bill.get_next_bill_stage_destination()}')
+    print(f'Last Update: {bill.get_last_update()}')
+    print(f'Bill Type: {bill.get_bill_type()}')
+    print('------')
+    break
+    #bills.append(Bill(BeautifulSoup(element))
 
-try:
-    bills = driver.find_elements_by_class_name('card-bill')
-    print(bills)
-except NoSuchElementException as err:
-    print('No such element exception')
