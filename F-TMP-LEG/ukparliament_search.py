@@ -67,7 +67,7 @@ class StringBuilder():
         self.bits = []
 
     def set_search_term(self, search_term: str):
-        self.bits.append(f'SearchTerm={search_term.split("+")}')
+        self.bits.append(f'SearchTerm={"+".join(search_term.split(" "))}')
 
     def set_session(self, session: BillSession):
         self.bits.append(f'Session={session.value["value"]}')
@@ -129,7 +129,7 @@ class Bill():
 builder = StringBuilder()
 builder.set_search_term('European Union')
 
-response = requests.get(builder.build())
+print(builder.build())
 soup = BeautifulSoup(response.content, features='lxml')
 
 bill_elements = soup.find_all('div', {'class': 'card-bill'})
