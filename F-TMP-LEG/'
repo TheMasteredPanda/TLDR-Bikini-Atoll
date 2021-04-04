@@ -218,12 +218,6 @@ class SearchForm():
     def get_bill_type_choices(self):
         return self.bill_type_choices
 
-    def set_bill_type(self, value: str):
-        for choice in self.bill_type_choices:
-            if choice.get_name().lower() == value.lower():
-                choice.click()
-                break
-
     def set_sort_order(self, order: SortOrder):
         self.sort_by_element.select_by_value(order.value['value'])
 
@@ -280,11 +274,11 @@ class Bill():
         stage_element = table_elements[1]
         stage_element_content = stage_element.get_attribute('innerHTML').split('<br>')
         self.current_stage = stage_element_content[0]
-        self.current_stage_date = stage_element_content[1] if len(stage_element_content) > 1 else None
+        self.current_stage_date = stage_element_content[1]
         cosponsor_element_content = table_elements[2].get_attribute('innerHTML').split('<br>')
         cosponsor_split = cosponsor_element_content[1].strip().split(' ')
         self.cosponsor_count = cosponsor_split[0]
-        self.cosponsor_constitution = cosponsor_split[1].replace('(', '').replace(')', '').split(',') if len(cosponsor_split) > 1 else[]
+        self.cosponsor_constitution = cosponsor_split[1].replace('(', '').replace(')', '').split(',')
         progression = None
         if len(table_elements) == 4:
             content = table_elements[3].get_attribute('innerHTML')
@@ -332,7 +326,6 @@ def wait_for_results():
         exit()
 
 wait_for_results()
-
 results_element = driver.find_element_by_class_name('results')
 form = SearchForm(driver)
 
@@ -351,21 +344,14 @@ except TimeoutException as ingore:
 
 wait_for_results()
 
-
 try:
-    bill_subject_element: Select = Select(WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, 'searchform_field_terms'))))
-    subject = form.get_bill_subjects()[14]
-    print(subject)
-    driver.execute_script(f'$("#searchform_field_terms").val({subject["id"]}).change()')
-    form_bill_type_element = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, 'searchform_field_bill_type')))
-    response = driver.execute_script(f'return $("#searchform_field_bill_type").find(".choices").length')
-    print(response)
-    exit()
+
+    bill_subject_element: Select = Select(WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, 'searchform_field_terms')))
+    bill_subject_element.select_by_value(form.get_bill_subjects()[1]['id'])
 except TimeoutException as ignore:
     print('Timeout 3')
     driver.quit()
     exit()
-
 
 #form.set_search_box_content('FASTER Act')
 #form.set_sort_order(SortOrder.RELEVANCE)
@@ -390,3 +376,4 @@ for entry in bills:
     print(f'Title: {bill.get_title()}{next_line}Introduced: {bill.get_introduction_date()}{next_line}Current Stage: {bill.get_current_stage()}{next_line}Cosponsor Count: {bill.get_cosponsor_count()}{next_line}Cosponsor Consitution: {bill.get_consponsor_constitution()}{next_line}Bill ID: {bill.get_bill_id()}{next_line}Bill Type: {bill.get_bill_type().name}{next_line}URL: {bill.get_url()}')
     print(f'Progression: {bill.get_progression()}' if bill.get_progression() is not None else '')
     print('-----------------------------------------------------')
+    break
