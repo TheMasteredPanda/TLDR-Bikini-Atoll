@@ -9,6 +9,15 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.common.by import By
 
+class ResultsSortOrder(Enum):
+    RELEVANCE = {'value': 'relevance', 'name': 'Relevance of Title/Text'}
+    SECRET_SAUCE = {'value': '-proscore', 'name': 'Secret Sauce'}
+    NEWEST_FIRST = {'value': '-introduced_date', 'name': 'Introduced (Newest First)'}
+    OLDEST_FIRST = {'value': 'introduced_date', 'name': 'Introduced (Oldest Frist)'}
+    LAST_MAJOR_ACTION = {'value': '-current_status_date', 'name': 'Last Major Action (Recent First)'}
+    MOST_COSPONSORS = {'value': '-cosponsor_count', 'name': 'Cosponors (Most first)'}
+    LEST_FIRST = {'value': 'cosponsor-count', 'name': 'Cosponsors (Fewest First)'}
+
 class CongressOption():
     def __init__(self, element: WebElement):
         self.value = element.get_attribute('value')
@@ -109,12 +118,15 @@ class PartyMember():
     def set_bills_sponsored(self, value: str):
         self.sponsored_bills = value
 
+    def get_name(self):
+        return self.member_name
+
 class Party():
     def __init__(self, element: WebElement):
         self.value = element.get_attribute('value')
         inner_html = element.get_attribute('innerHTML').split(' (')
         self.bills = inner_html[1].replace(')', '').replace('bills', '')
-        self.members = []
+        self.members: list[PartyMember] = []
 
     def get_name(self):
         return self.value
@@ -126,31 +138,44 @@ class Party():
         return self.bills
 
     def get_key(self):
+        if self.value == 'Minority Party': return 'Min'
+        if self.value == 'Majority Party': return 'Maj'
         return self.value[0]
 
     def add_member(self, member: PartyMember):
         self.members.append(member)
     
-    def find_member_by_id(self, value: str):
+    def find_member_by_id(self, value: str) -> PartyMember:
         for member in self.members:
             if member.get_value() == value:
                 return member
+        raise Exception(f'{value} is not a valid memeber id.')
 
-    def find_member_by_area(self, value: str):
+    def find_member_by_area(self, value: str) -> PartyMember:
         for member in self.members:
             if member.get_representing_area().lower() == value.lower():
                 return member
+        raise Exception(f'{value} is not a valid area id')
+    
+    def find_member_by_name(self, first_name: str, surname: str) -> PartyMember:
+        for member in self.members:
+            split_name = member.get_name().split(', ')
+            if first_name in split_name[1]:
+                if surname != None and surname in split_name[0]:
+                    return member
+
+        raise Exception(f'{name} is not a valid Congressperson or Senator')
 
 class BillType(Enum):
-    ALL = {'value': 'All', 'name': 'All Bills'}
-    HB = {'value': 'H.R.', 'name': 'House Bill'}
-    SB = {'value': 'S.', 'name': 'Senate Bill'}
-    HRES = {'value': 'H.Res.', 'name': 'House Resolution'}
-    SRES = {'value': 'S.Res.', 'name': 'Senate Resolution'}
-    HJRES = {'value': 'H.J.Res.', 'name': 'Joint Resolution Originating in House of Respresentatives'}
-    SJRES = {'value': 'S.J.Res.', 'name': 'Join Resolution Originating in Senate'}
-    HCRES = {'value': 'H.Con.Res.', 'name': 'Concurrent Resolution Originating in House of Respresentatives'}
-    SCRES = {'value': 'S.Con.Res.', 'name': 'Concurrent Resolution Originating in Senate'}
+    ALL = {'value': 'All', 'label': 'All', 'name': 'All Bills'}
+    HB = {'value': '3', 'label': 'H.R.', 'name': 'House Bill'}
+    SB = {'value': '2', 'label': 'S.', 'name': 'Senate Bill'}
+    HRES = {'value': '1', 'label': 'H.Res.', 'name': 'House Resolution'}
+    SRES = {'value': '4', 'label': 'S.Res.', 'name': 'Senate Resolution'}
+    HJRES = {'value': '7', 'label': 'H.J.Res.', 'name': 'Joint Resolution Originating in House of Respresentatives'}
+    SJRES = {'value': '8', 'label': 'S.J.Res.', 'name': 'Join Resolution Originating in Senate'}
+    HCRES = {'value': '5', 'label': 'H.Con.Res.', 'name': 'Concurrent Resolution Originating in House of Respresentatives'}
+    SCRES = {'value': '6', 'label': 'S.Con.Res.', 'name': 'Concurrent Resolution Originating in Senate'}
     
     @classmethod
     def from_name(cls, name: str):
@@ -167,6 +192,13 @@ class BillType(Enum):
         raise Exception(f'{value} is no associated with any enum')
 
     @classmethod
+    def from_label(cls, value: str):
+        for option in cls:
+            if option.value['label'].lower() == value.lower():
+                return option
+        raise Exception(f'{value} is not accociated with any enum')
+
+    @classmethod
     def is_valid(cls, name: str):
         try:
             cls.from_name(name)
@@ -176,14 +208,18 @@ class BillType(Enum):
                 cls.from_value(name)
                 return True
             except Exception as ignore_2:
-                return False
+                try:
+                    cls.from_label(name)
+                    return True
+                except Exception as ignore_3:
+                    return False
             return False
 
 
 class BillTypeCheckbox():
     def __init__(self, element: WebElement):
         self.value = element.find_element_by_tag_name('input').get_attribute('value')
-        self.bill_type = BillType.from_value(element.find_element_by_class_name('name').get_attribute('innerHTML'))
+        self.bill_type = BillType.from_label(element.find_element_by_class_name('name').get_attribute('innerHTML'))
         self.count = element.find_element_by_class_name('count').get_attribute('innerHTML').replace('(', '').replace(')', '').replace('bills', '')
 
     def get_value(self):
@@ -210,6 +246,12 @@ class DataParser():
         self.parties = []
         self.bill_choices = []
         self.all_option = {'value': '__ALL__', 'name': 'All'}
+
+    def set_url(self, url: str):
+        self.driver.get(url)
+
+    def reset_url(self):
+        self.driver.get('https://www.govtrack.us/congress/bills/browse')
         
     def parse_select_options(self):
         try:
@@ -292,18 +334,17 @@ class DataParser():
             for option in field_congress_select.options:
                 if option.get_attribute('value') == '__ALL__': continue
                 self.congress_options.append(CongressOption(option))
-
-            exit()
         except TimeoutException as ignore:
             print('Timeout 0')
             self.driver.quit()
             exit()
         
 
-    def get_party_by_key(self, key: str):
+    def get_party_by_key(self, key: str) -> Party:
         for party in self.parties:
             if key.lower() == party.get_key().lower():
                 return party
+        raise Exception(f'{key} was not a valid party key.')
 
     def remove_followus_modal(self):
         try:
@@ -314,6 +355,21 @@ class DataParser():
             print('Timeout 2')
             self.driver.quit()
             exit()
+
+    def get_congress_by_id(self, congress_id: str):
+        for option in self.congress_options:
+            if option.get_value() == congress_id:
+                return option
+        raise Exception(f'{congress_id} is not a valid congress id.')
+
+    def get_status_choices(self):
+        return self.current_status_choices
+
+    def get_bill_status(self, status_id: str):
+        for option in self.current_status_choices:
+            if option.get_value() == status_id:
+                return option
+        raise Exception(f'{status_id} is not a valid status choice.')
 
     def parse(self):
 
@@ -333,6 +389,8 @@ class DataParser():
             self.driver.quit()
             exit()
 
+    def get_subjects(self):
+        return self.subjects
 
     def get_bills(self):
         return self.bills
@@ -356,13 +414,14 @@ class Bill():
         table_element = info_container.find('table')
         td_elements = table_element.find_all('td')
         self.introduced = td_elements[0].text.replace('Introduced: ', '')
-        full_current_state = td_elements[1].decode_contents().split('<br/>')
+
+        full_current_state = td_elements[1].decode_contents().split('<br/>') if td_elements[1].text != '' else ['', '']
         self.current_state_name = full_current_state[0]
         self.current_state_date = full_current_state[1]
         cosponsors_element = td_elements[2].decode_contents().split('<br/>')
         cosponsor_text_split = cosponsors_element[1].split(' ')
         self.cosponsors_count = cosponsor_text_split[0]
-        self.cosponsors_constition = cosponsor_text_split[1].replace('(', '').replace(')', '').split(',')
+        self.cosponsors_constition = cosponsor_text_split[1].replace('(', '').replace(')', '').split(',') if len(cosponsor_text_split) > 1 else '0'
         if len(td_elements) > 4:
             self.progress = td_elements[3].decode_contents().split('<br/>')[1]
 
@@ -403,13 +462,65 @@ https://www.govtrack.us/congress/bills/browse#
     &bill_type[]=5,4
     $current_status[]=4,4
 '''
+
+class URLBuilder():
+    def __init__(self):
+        self.url = 'https://govtrack.us/congress/bills/browse#'
+        self.bits = []
+
+    def set_congress(self, option: CongressOption):
+        self.bits.append(f'congress={option.get_value()}')
+
+    def set_sponsor(self, sponsor: PartyMember):
+        self.bits.append(f'sponsor={sponsor.get_value()}')
+
+    def set_cosponsor(self, cosponsor: PartyMember):
+        self.bits.append(f'cosponsors={cosponsor.get_value()}')
+
+    def set_commitee(self, option: CommitteeOption):
+        self.bits.append(f'committees={option.get_value()}')
+
+    def set_subject(self, subject: dict):
+        self.bits.append(f'terms={subject["value"]}')
+
+    def set_sponsor_party(self, sponsor_party: Party):
+        self.bits.append(f'sponsor_party={sponsor_party.get_value()}')
+
+    def set_bill_type(self, btypes: list[BillType]):
+        self.bits.append(f'bill_type[]={", ".join(map(lambda bt: bt.value["value"], btypes))}')
+
+    def set_current_status(self, bill_statuses: list[CurrentStatusCheckbox]):
+        self.bits.append(f'current_status[]={",".join(map(lambda bs: bs.get_value(), bill_statuses))}')
+
+    def set_search_term(self, search_term: str):
+        self.bits.append(f'text={"+".join(search_term.split(" "))}')
+
+    def set_sort_order(self, order: ResultsSortOrder):
+        self.bits.append(f'sort={order.value["value"]}')
+
+    def build(self):
+        return f'{self.url}{"&".join(self.bits)}'
+
 parse = DataParser()
 parse.remove_followus_modal()
 parse.parse_select_options()
+builder = URLBuilder()
+builder.set_congress(parse.get_congress_by_id('116'))
+#builder.set_current_status([parse.get_bill_status('5')])
+builder.set_sort_order(ResultsSortOrder.RELEVANCE)
+#builder.set_sponsor(parse.get_party_by_key('R').find_member_by_name('John', 'Thune'))
+#builder.set_sponsor_party(parse.get_party_by_key('Min'))
+#builder.set_bill_type([BillType.HRES])
+#builder.set_subject(parse.get_subjects()[1])
+#builder.set_cosponsor(parse.get_party_by_key('D').find_member_by_area('NC12'))
+print(builder.build())
+parse.set_url(builder.build())
 parse.parse()
 
 for bill in parse.get_bills():
+
     print('-----')
     next_line = '\n'
     print(f"Title: {bill.get_bill_title()}{next_line}Bill ID: {bill.get_bill_id()}{next_line}Bill Type: {bill.get_bill_type()}{next_line}Bill Link: {bill.get_link()}{next_line}Sponsor: {bill.get_sponsor()}{next_line}Cosponsor Count: {bill.cosponsors_count}{next_line}Cosponsor Constitution: {bill.get_cosponsors_constitution()}")
     print('-----')
+    break
